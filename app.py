@@ -14,17 +14,15 @@ df['month'] = df['date'].dt.month
 df['year'] = df['date'].dt.year
 df['city'] = df['city'].fillna('Unknown')
 df['vertical'] = df['vertical'].fillna('Other')
-
-# Split investors for word cloud & filters
 df['investor_list'] = df['investors'].fillna('').str.split(',')
 
-# Flatten list of investors for wordcloud and filters
+# Flatten list of investors
 investor_flat = [inv.strip() for sublist in df['investor_list'] for inv in sublist if inv.strip() != '']
 
-# Sidebar filters for startup
+# Sidebar filters
 st.sidebar.header("Filter Startups")
-selected_vertical = st.sidebar.multiselect('Vertical(s)', options=sorted(df['vertical'].unique()), default=None)
-selected_city = st.sidebar.multiselect('City(s)', options=sorted(df['city'].unique()), default=None)
+selected_vertical = st.sidebar.multiselect('Vertical(s)', options=sorted(df['vertical'].unique()))
+selected_city = st.sidebar.multiselect('City(s)', options=sorted(df['city'].unique()))
 
 def filter_startups(data):
     if selected_vertical:
@@ -35,28 +33,35 @@ def filter_startups(data):
 
 def load_overall_analysis():
     st.title('Overall Funding Analysis')
-
     filtered_df = filter_startups(df)
 
-    # Basic Metrics
-    total = round(filtered_df['amount'].sum())
-    max_funding = filtered_df.groupby('startup')['amount'].max().max()
-    avg_funding = filtered_df.groupby('startup')['amount'].sum().mean()
+    if filtered_df.empty:
+        st.warning("No data available for the selected filters.")
+        return
+
+    # Safe metrics
+    total = round(filtered_df['amount'].sum()) if not pd.isna(filtered_df['amount'].sum()) else 0
+
+    max_funding_val = filtered_df.groupby('startup')['amount'].max().max()
+    max_funding = round(max_funding_val) if not pd.isna(max_funding_val) else 0
+
+    avg_funding_val = filtered_df.groupby('startup')['amount'].sum().mean()
+    avg_funding = round(avg_funding_val) if not pd.isna(avg_funding_val) else 0
+
     num_startups = filtered_df['startup'].nunique()
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric('Total Investment', f'{total} Cr')
-    col2.metric('Max Investment', f'{round(max_funding)} Cr')
-    col3.metric('Avg Investment', f'{round(avg_funding)} Cr')
+    col2.metric('Max Investment', f'{max_funding} Cr')
+    col3.metric('Avg Investment', f'{avg_funding} Cr')
     col4.metric('Funded Startups', num_startups)
 
-    # Top 5 Startups by Funding
+    # Top 5 Startups
     st.subheader("Top 5 Funded Startups")
     top_startups = filtered_df.groupby('startup')['amount'].sum().sort_values(ascending=False).head(5)
     fig, ax = plt.subplots()
     sns.barplot(x=top_startups.values, y=top_startups.index, palette='viridis', ax=ax)
     ax.set_xlabel('Total Funding (Cr)')
-    ax.set_ylabel('Startup')
     st.pyplot(fig)
 
     # Funding Round Distribution
@@ -67,7 +72,7 @@ def load_overall_analysis():
     ax2.axis('equal')
     st.pyplot(fig2)
 
-    # MoM Funding Trend with Rolling Average
+    # Monthly Trend
     st.subheader("Monthly Funding Trend")
     monthly_df = filtered_df.groupby(['year', 'month'])['amount'].sum().reset_index()
     monthly_df['date'] = pd.to_datetime(monthly_df[['year', 'month']].assign(DAY=1))
@@ -91,7 +96,6 @@ def load_startup_analysis():
     st.write(f"Funding Rounds: {startup_df.shape[0]}")
     st.dataframe(startup_df[['date', 'round', 'amount', 'investors', 'vertical', 'city']])
 
-    # Funding over time for selected startup
     funding_over_time = startup_df.groupby(['year', 'month'])['amount'].sum().reset_index()
     funding_over_time['date'] = pd.to_datetime(funding_over_time[['year', 'month']].assign(DAY=1))
     fig, ax = plt.subplots()
@@ -103,8 +107,11 @@ def load_startup_analysis():
 
 def load_investor_details(investor):
     st.title(f"Investor Analysis: {investor}")
-
     inv_df = df[df['investors'].str.contains(investor, na=False)]
+
+    if inv_df.empty:
+        st.warning("No data available for this investor.")
+        return
 
     st.subheader('Recent Investments')
     recent_df = inv_df.sort_values(by='date', ascending=False).head()
@@ -118,7 +125,6 @@ def load_investor_details(investor):
         fig, ax = plt.subplots()
         sns.barplot(x=biggest_investments.values, y=biggest_investments.index, palette='magma', ax=ax)
         ax.set_xlabel('Investment Amount (Cr)')
-        ax.set_ylabel('Startup')
         st.pyplot(fig)
 
     with col2:
@@ -129,7 +135,6 @@ def load_investor_details(investor):
         ax2.axis('equal')
         st.pyplot(fig2)
 
-    # YoY Investment Trend
     yearly_inv = inv_df.groupby('year')['amount'].sum()
     st.subheader('Yearly Investment Trend')
     fig3, ax3 = plt.subplots()
@@ -141,8 +146,6 @@ def load_investor_details(investor):
 def load_leaderboards():
     st.title("Leaderboards")
 
-    # Top Investors by Total Investment
-    inv_totals = pd.Series(investor_flat).value_counts()
     inv_sums = df.explode('investor_list').groupby('investor_list')['amount'].sum()
     top_investors = inv_sums.sort_values(ascending=False).head(5)
 
@@ -158,7 +161,7 @@ def load_leaderboards():
     with col2:
         st.subheader("Investor Activity Word Cloud")
         wordcloud = WordCloud(width=800, height=400, background_color='white').generate(' '.join(investor_flat))
-        fig, ax = plt.subplots(figsize=(10,5))
+        fig, ax = plt.subplots(figsize=(10, 5))
         ax.imshow(wordcloud, interpolation='bilinear')
         ax.axis('off')
         st.pyplot(fig)
@@ -172,8 +175,7 @@ def load_map_view():
     try:
         import pydeck as pdk
 
-        # You need a city-lat-long dataset or geocoder here; assuming we have lat/lon columns
-        # For demo, we create random lat/lon near India (adjust as per your data)
+        # Simulated lat/lon for demo purposes
         np.random.seed(42)
         city_data['lat'] = np.random.uniform(20, 30, size=city_data.shape[0])
         city_data['lon'] = np.random.uniform(70, 80, size=city_data.shape[0])
@@ -202,7 +204,7 @@ def load_map_view():
     except ImportError:
         st.error("pydeck is required for map visualization. Install it with `pip install pydeck`.")
 
-# Main menu in sidebar
+# Sidebar menu
 option = st.sidebar.selectbox("Choose Analysis", ['Overall Analysis', 'Startup Analysis', 'Investor Analysis', 'Leaderboards', 'Map View'])
 
 if option == 'Overall Analysis':
@@ -210,7 +212,6 @@ if option == 'Overall Analysis':
 elif option == 'Startup Analysis':
     load_startup_analysis()
 elif option == 'Investor Analysis':
-    # Select investor with dropdown and button to load details
     unique_investors = sorted(set(investor_flat))
     selected_investor = st.sidebar.selectbox('Select Investor', unique_investors)
     btn = st.sidebar.button('Load Investor Details')
